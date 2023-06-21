@@ -1,6 +1,6 @@
 
 # User defined
-/data/*
+# /data/*
 
 # History files
 .Rhistory
