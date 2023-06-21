@@ -10,13 +10,18 @@ server <- function(input, output, session) {
   })
 
 # TOP LEVEL FILTERS ----
-  db_fin_top <- reactive({
-    db_fin |> dplyr::filter(currency == input$in_currency
+  db_fin_top <- reactive(
+    dplyr::filter(db_fin, currency == input$in_currency)
     #dplyr::between(end_date, input$in_end[1], input$in_end[2])
-    )
-  })
+  )
+  db_fin_time_top <- reactive(
+    dplyr::filter(db_fin_time, currency == input$in_currency)
+  )
+
 
 # HOME PAGE ----
+
+  output$empty_row <- renderPrint(cat(" "))
 
   ## Calculate main nums for later use ----
   main_nums <- reactive({
@@ -33,14 +38,14 @@ server <- function(input, output, session) {
     main_nums <- list(income = income, expense = expense,
     loan = loan, balance = balance)
   })
-  ## Calculate loans/expenses expiring in 6 months
-  expires <- reactive({
-    dplyr::filter(db_fin_top(), active == "active", expire_months <= 6) |>
-      dplyr::group_by(expire_months, item) |>
+  ## Expiring expenses in 6 months
+expires <- reactive({
+    db_fin_top() |>
+      dplyr::filter(active == "active", expire_months <= 6) |>
+      dplyr::group_by(expire_months, item, category) |>
       dplyr::tally(value, name = "value") |>
-      dplyr::select(item, expire_months, value)
+      dplyr::select(category, item, expire_months, value)
   })
-
 
   ## Highlights ----
 
@@ -58,15 +63,33 @@ server <- function(input, output, session) {
     cat(fmat.num(main_nums()[["balance"]]), " ", input$in_currency)
   })
 
-  ### Highlight loans expires
-  output$expire3 <- renderPrint({
-    cat(fmat.num(sum(expires()[expires()["expire_months"] <= 3, "value"])),
-      "in 3 months")
+  ### Highlight expense/loans expires
+  output$exp_expire3 <- renderPrint({
+    df <- expires()
+    x <- df[
+      df$expire_months <= 3 & df$category %in% c("expense", "loan"), "value"
+    ]
+    HTML(paste(fmat.num(sum(x)), "in 3 months", sep = "<br/>"))
   })
-  output$expire6 <- renderPrint({
-    cat(fmat.num(sum(expires()[expires()["expire_months"] > 3, "value"])),
-      "in 6 months")
+  output$exp_expire6 <- renderPrint({
+    df <- expires()
+    x <- df[
+      df$expire_months > 3 & df$category %in% c("expense", "loan"), "value"
+    ]
+    HTML(paste(fmat.num(sum(x)), "in 6 months", sep = "<br/>"))
   })
+  ### Highlight income expires
+  output$inc_expire3 <- renderUI({
+    df <- expires()
+    x <- df[df$expire_months <= 3 & df$category == "income", "value"]
+    HTML(paste(fmat.num(sum(x)), "in 3 months", sep = "<br/>"))
+  })
+  output$inc_expire6 <- renderPrint({
+    df <- expires()
+    x <- df[df$expire_months > 3 & df$category == "income", "value"]
+    HTML(paste(fmat.num(sum(x)), "in 6 months", sep = "<br/>"))
+  })
+
 
   ## Expense asigments table by bank ----
   output$asigns <- renderTable({
@@ -81,8 +104,8 @@ server <- function(input, output, session) {
     # Asign life balance as reminder of income-expenses
     balance <- sum(asigns$income) - sum(asigns$total_expenses)
     asigns$life_balance <- 0
-    asigns$life_balance[asigns$bank_asign == "bpi_current"] <- balance * 0.7
-    asigns$life_balance[asigns$bank_asign == "santander"] <- balance * 0.3
+    asigns$life_balance[asigns$bank_asign == "bpi_current"] <- balance * 0.8
+    asigns$life_balance[asigns$bank_asign == "santander"] <- balance * 0.2
     # Get column totals
     asigns <- dplyr::mutate(
       asigns, input = total_expenses + life_balance, .before = 2
@@ -95,16 +118,64 @@ server <- function(input, output, session) {
       dplyr::mutate(dplyr::across(
         c(input, total_expenses, life_balance), ~ fmat.num(.)
       ))
+    new_names <- c(
+      "Asigned Bank" = "bank_asign",
+      "Input transfer" = "input",
+      "Expenses" = "total_expenses",
+      "Life Balance" = "life_balance"
+    )
+    asigns <- dplyr::rename(asigns, dplyr::all_of(new_names))
   },
   striped = TRUE,
-  caption = as.character(shiny::tags$h4(style = "color: black", "Bank assignments")),
-  caption.placement = "top",
+  # caption = as.character(shiny::tags$h4(style = "color: black", "Bank assignments")),
+  # caption.placement = "top",
   digits = 0, align = "c"
   )
 
+  ## Expenses trhough time
+  output$fin_time <- renderPlotly({
+    df <- db_fin_time_top() |>
+      dplyr::select(category, date, value)
+    # recat expense & loan into expenses
+    if (input$agg_expenses) {
+      df <- dplyr::mutate(df, category = dplyr::if_else(
+        category %in% c("expense", "loan"), "expenses", category))
+    }
+    # Summarise by data and cumsum
+    df <- dplyr::group_by(df, category, date) |>
+      dplyr::tally(value, name = "value") |>
+      dplyr::mutate(value_cum = round(cumsum(value), 0))
+
+    if (!input$agg_expenses) {
+      # Get last expense and set same value for today. (only when not agg_expenses) # nolint: line_length_linter.
+      # Loan/income run for years/months ahead, but last expense added usually is months ago. To at least read the current expenses until today,use this. This piece makes no sense when expense andloanare aggregated. # nolint: line_length_linter.
+      max_date <- df[df$category == "expense", "date"] |> dplyr::pull() |> max()
+      max_val <- df[df$date == max_date & df$category == "expense", "value_cum"] |>
+        dplyr::pull()
+      expense_today <- data.frame(
+        category = "expense", date = Sys.Date(), value = 0, value_cum = max_val
+      )
+      df <- dplyr::bind_rows(df, expense_today)
+    }
+    # Draw plot
+    cols <- c(income = "green3", expense = "goldenrod3", 
+      loan = "red3", expenses = "red3")
+    linep <- ggplot(df, aes(x = date, y = value_cum, color = category)) +
+      geom_step() +
+      scale_y_continuous(limits = c(0, NA), labels = scales::comma) +
+      scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+      scale_colour_manual(values = cols) +
+      labs(y = "Amount") +
+      theme_minimal() +
+      theme(axis.title.x = element_blank())
+
+    lineply <- ggplotly(linep) |> layout(legend = list(orientation = 'h'))
+})
+
   ## Staked bar by group
   output$stackp <- renderPlotly({
-    stackp <- dplyr::filter(db_fin_top(), active == "active", category != "income") |>
+    stackp <- db_fin_top() |>
+      dplyr::filter(active == "active", category != "income") |>
       dplyr::group_by(category, group) |> dplyr::tally(value, name = "value") |>
       ggplot(aes(x = group, y = value, fill = category, text = fmat.num(value))) +
       geom_bar(stat = "identity") +
@@ -115,7 +186,8 @@ server <- function(input, output, session) {
       theme(
         axis.title = element_blank(),
         axis.text.x = ggplot2::element_text(angle = -45, hjust = 0, vjust = 1))
-    stackply <- ggplotly(stackp) |> layout(showlegend = FALSE)
+    stackply <- ggplotly(stackp, tooltip = c("x", "y")) |>
+      layout(showlegend = FALSE)
   })
   ## Waterfall chart by group
   output$waterp <- renderPlotly({
@@ -166,9 +238,8 @@ server <- function(input, output, session) {
       ggplot2::theme(
         axis.text.x = ggplot2::element_text(angle = -45, hjust = 0, vjust = 1)
       )
-    waterply <- ggplotly(waterp) |> layout(
-      legend = list(orientation = 'h', x = 0.3, y = 1.1)
-    )
+    waterply <- ggplotly(waterp) |> 
+      layout(legend = list(orientation = 'h', x = 0.3, y = 1.1))
   })
 
   # DETAILED
@@ -191,9 +262,11 @@ server <- function(input, output, session) {
     # Convert to factor and unique identify groups (groups+category)
     balance <- balance |>
       dplyr::mutate(
-          category = factor(category, levels = c("income", "expense", "loan", "net")),
+          category = factor(category, 
+            levels = c("income", "expense", "loan", "net")),
           #group = factor(paste0(pre_cat, "_", item), levels = unique(paste0(pre_cat, "_", item))),
-          item = factor(paste0(pre_grp, "_", item), levels = unique(paste0(pre_grp, "_", item))),
+          item = factor(paste0(pre_grp, "_", item), 
+            levels = unique(paste0(pre_grp, "_", item))),
       )
     # Calculate ends for waterfall
     balance$id <- seq_along(balance$value)
@@ -223,11 +296,25 @@ server <- function(input, output, session) {
   })
 
   output$expire_detail <- renderTable({
-      dplyr::select(expires(), item, months = expire_months, value)
+    expires() |>
+      dplyr::filter(category %in% c("expense", "loan")) |>
+      dplyr::select(item, months = expire_months, value)
   },
   striped = TRUE,
   caption = as.character(shiny::tags$h4(
-    style = "color: black", "Loans expiring before 6 months"
+    style = "color: black", "Expenses expiring"
+  )),
+  caption.placement = "top",
+  digits = 0, align = "l"
+  )
+  output$income_detail <- renderTable({
+    expires() |>
+      dplyr::filter(category == "income") |>
+      dplyr::select(item, months = expire_months, value)
+  },
+  striped = TRUE,
+  caption = as.character(shiny::tags$h4(
+    style = "color: black", "Income expiring"
   )),
   caption.placement = "top",
   digits = 0, align = "l"
@@ -258,8 +345,5 @@ server <- function(input, output, session) {
     # Render datatable
     DT::datatable(db_fin_data, editable = TRUE)
   })
-
-# GRAPHICS----
-
 
 }

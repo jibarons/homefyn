@@ -6,9 +6,18 @@ options(shiny.error = recover)
 ui <- secure_app(head_auth = tags$script(inactivity),
 fluidPage(
   theme = shinytheme("united"),
+  # Define HTML tags
+  tags$head(
+    tags$style(HTML("
+      hr {border-top: 1px solid #000000; color: gray}
+      h1 {font-weight:bold}
+      h2 {font-weight:bold}
+    "))
+  ),
+
   titlePanel(
     tags$h1(
-      "My Home Finances", icon("coins"),
+      "My Home Finances Tracker", icon("coins"),
       style = "display: inline-block; background-color: #ea5421; width: 100%; 
       height: 50px;text-align: center; color:white; font-weight:bold"
     )
@@ -21,40 +30,62 @@ fluidPage(
       direction = "horizontal", size = "xs"
     )),
   ),
-  navbarPage("HomeFyn",
+  navbarPage("MyHomeFin",
 
     tabPanel("Home",
       # Summary outputs
       mainPanel(width = 12,
         fluidRow(
           column(3,
-            tags$h2(icon("hand-holding-dollar"), "Income", style = "font-weight:bold"),
+            tags$h1(icon("hand-holding-dollar"), "Income"),
             tags$h2(textOutput("income"), style = "color:#00cd00")
           ),
           column(3,
-            tags$h2(icon("money-bill-transfer"), "Expense", style = "font-weight:bold"),
+            tags$h1(icon("money-bill-transfer"), "Expense"),
             tags$h2(textOutput("expense"), style = "color:#cd9b1d")
           ),
           column(3,
-            tags$h2(icon("file-invoice-dollar"), "Loan", style = "font-weight:bold"),
+            tags$h1(icon("file-invoice-dollar"), "Loan"),
             tags$h2(textOutput("loan"), style = "color:#cd0000")
           ),
           column(3,
-            tags$h2(icon("scale-balanced"), "Life balance:", style = "font-weight:bold"),
+            tags$h1(icon("scale-balanced"), "Life balance:"),
             tags$h2(textOutput("balance"), style = "color:#4f94cd")
           ),
         ),
+        fluidRow(column(width = 12, tags$h1(textOutput("empty_row")))),
+
         fluidRow(
-          mainPanel(width = 9,
-            column(3, tableOutput("asigns")),
+          hr(),
+          mainPanel(width = 6,
+            fluidRow(
+              # Expenses expiring
+              column(4, tags$h2(icon("arrow-trend-up"), "Expiring expenses:")),
+              column(4, tags$h3(htmlOutput("exp_expire3"),
+                style = "color:#228b22; font-weight:normal")),
+              column(4, tags$h3(htmlOutput("exp_expire6"),
+                style = "color:#228b22; font-weight:normal")),
+            ),
+            fluidRow(
+              # Income expiring 
+              column(4, tags$h2(icon("arrow-trend-down"), "Expiring income:")),
+              column(4, tags$h3(htmlOutput("inc_expire3"),
+                style = "color:#8f0101; font-weight:normal")),
+              column(4, tags$h3(htmlOutput("inc_expire6"),
+                style = "color:#8f0101; font-weight:normal")),
+            )
           ),
-          mainPanel(width = 3,
-            fluidRow(tags$h2(icon("money-bill-trend-up"), "Expires soon:",
-                style = "font-weight:bold")),
-            fluidRow(tags$h3(textOutput("expire3"), style = "color:#228b22")),
-            fluidRow(tags$h3(textOutput("expire6"), style = "color:#228b22")),
+          mainPanel(width = 6,
+            column(12, tableOutput("asigns"),  align = "center")
           )
         ),
+        fluidRow(
+          hr(), materialSwitch(
+          inputId = "agg_expenses", label = "Aggregate expenses",
+          value = TRUE
+          )
+        ),
+        fluidRow(plotlyOutput("fin_time")),
         fluidRow(
           column(7, plotlyOutput("waterp")),
           column(5, plotlyOutput("stackp"))
@@ -62,7 +93,10 @@ fluidPage(
       )
     ),
     tabPanel("Details",
-      fluidRow(column(6, tableOutput("expire_detail"))),
+      fluidRow(
+        column(6, tableOutput("expire_detail")),
+        column(6, tableOutput("income_detail"))
+      ),
       fluidRow(plotlyOutput("waterp_detail"))
     ),
     tabPanel("Finances Data",
