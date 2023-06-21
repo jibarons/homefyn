@@ -35,13 +35,10 @@ pass <- Sys.getenv("homefin_pass")
 credentials <- data.frame(
   user = c("guest"),
   password = c("123$5"),
-  # comment = c("alsace", "auvergne", "bretagne"), %>% 
   stringsAsFactors = FALSE
 )
 
 # Setup
-# Google drive secrets
-options(gargle_oauth_cache = ".secrets")
 # Custom funs
 fmat.num = function(x, d = 0) {
   x <- sprintf(paste0("%.", d, "f"), x) |> as.numeric()
@@ -51,11 +48,6 @@ fmat.num = function(x, d = 0) {
 
 # Get finance data ----
 db_fin <- readxl::read_excel("../data/mockup_fin_data.xlsx")
-# Connect to Google drive (mockup)
-# googlesheets4::gs4_auth(email = "some@gmail.com", cache = ".secrets")
-# gsheet_id <- "some_id_123"
-# db_fin <- googlesheets4::read_sheet(gsheet_id)
-
 
 # Exchange rates ----
 ## Get exchnage rates ----
